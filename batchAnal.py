@@ -51,6 +51,36 @@ def fit_exp_linearized(x, y):
         "yfit": yfit,
     }
 
+def fit_pow_linearized(x, y):
+    """
+    Fit y = A * x^B using linearization:
+    ln(y) = ln(A) + B * ln(x)
+    Returns dict with A, B, and fitted y.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    mask = np.isfinite(x) & np.isfinite(y) & (y > 0) & (x > 0)
+    x = x[mask]
+    y = y[mask]
+
+    if len(x) < 2:
+        return None
+
+    coeffs = np.polyfit(np.log(x), np.log(y), 1)
+    B = coeffs[0]
+    lnA = coeffs[1]
+    A = np.exp(lnA)
+    yfit = A * x**B
+
+    return {
+        "A": A,
+        "B": B,
+        "x": x,
+        "y": y,
+        "yfit": yfit,
+    }
+
 
 def read_run_table(sheet_id=SHEET_ID, gid=GID):
     url = google_sheet_csv_url(sheet_id, gid)
@@ -190,6 +220,7 @@ def make_gain_comparison_plot(df_pmt, outdir, pmt_name):
     # Direct SPE gain
     x_spe = df_spe["Vmon (V)"].values
     y_spe = df_spe["SPE gain"].values
+    sy_spe = df_spe["SPE gain err"].values
 
     # Normalize HIGH charge using highest-voltage SPE point
     idx_anchor = np.argmax(df_spe["Vmon (V)"].values)
@@ -209,24 +240,33 @@ def make_gain_comparison_plot(df_pmt, outdir, pmt_name):
 
     x_high = df_high["Vmon (V)"].values
     q_high = df_high["mean_charge_pC"].values
+    sq_high = df_high["mean_charge_pC_err"].values
     y_high_norm_gain = q_high * (gain_anchor / q_high_anchor)
+    sy_high_norm_gain = sq_high * (gain_anchor / q_high_anchor)
 
-    fit_spe = fit_exp_linearized(x_spe, y_spe)
-    fit_high = fit_exp_linearized(x_high, y_high_norm_gain)
+    # OLD function
+    # fit_spe = fit_exp_linearized(x_spe, y_spe)
+    # fit_high = fit_exp_linearized(x_high, y_high_norm_gain)
+    fit_spe  = fit_pow_linearized(x_spe, y_spe)
+    fit_high = fit_pow_linearized(x_high, y_high_norm_gain)
 
     plt.figure(figsize=(8, 6))
-    plt.plot(x_spe, y_spe, "o", label="SPE gain")
-    plt.plot(x_high, y_high_norm_gain, "s", label="HIGH normalized gain")
+    plt.errorbar(x_spe, y_spe, yerr = sy_spe, fmt = "o", capsize = 3, label="SPE gain")
+    plt.errorbar(x_high, y_high_norm_gain, yerr = sy_high_norm_gain, fmt = "s", capsize = 3, label="HIGH normalized gain")
 
     if fit_spe is not None:
         xs = np.linspace(np.min(fit_spe["x"]), np.max(fit_spe["x"]), 200)
-        ys = fit_spe["A"] * np.exp(fit_spe["B"] * xs)
-        plt.plot(xs, ys, "--", label=f"SPE fit: A exp(BV), B={fit_spe['B']:.4e}")
+        # ys = fit_spe["A"] * np.exp(fit_spe["B"] * xs)
+        ys = fit_spe["A"] * xs**fit_spe["B"]
+        # plt.plot(xs, ys, "--", label=f"SPE fit: A exp(BV), B={fit_spe['B']:.4e}")
+        plt.plot(xs, ys, "--", label=f"SPE fit: A x^B, B={fit_spe['B']:.4e}")
 
     if fit_high is not None:
         xh = np.linspace(np.min(fit_high["x"]), np.max(fit_high["x"]), 200)
-        yh = fit_high["A"] * np.exp(fit_high["B"] * xh)
-        plt.plot(xh, yh, "--", label=f"HIGH fit: A exp(BV), B={fit_high['B']:.4e}")
+        # yh = fit_high["A"] * np.exp(fit_high["B"] * xs)
+        yh = fit_high["A"] * xh**fit_high["B"]
+        # plt.plot(xh, yh, "--", label=f"HIGH fit: A exp(BV), B={fit_high['B']:.4e}")
+        plt.plot(xh, yh, "--", label=f"HIGH fit: A x^B, B={fit_high['B']:.4e}")
 
     plt.xlabel("Voltage [V]")
     plt.ylabel("Gain")
